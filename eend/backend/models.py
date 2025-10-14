@@ -36,12 +36,12 @@ B: mini-batch size
 class StateChangeDetector(Module):
     def __init__(self, n_units: int, dropout: float = 0.1, device: torch.device = torch.device("cpu")):
         """
-        CNN 기반 State Change Detector
+        CNN-based State Change Detector
 
         Args:
-            n_units (int): 입력 임베딩 차원
-            dropout (float): 드롭아웃 비율
-            device (torch.device): 실행할 디바이스 (기본값: "cpu")
+            n_units (int): input emb dim
+            dropout (float): drop out percentage
+            device (torch.device): device
         """
         super(StateChangeDetector, self).__init__()
         self.device = device
@@ -53,7 +53,7 @@ class StateChangeDetector(Module):
         self.to(device)
 
     def forward(self, xs: torch.Tensor) -> torch.Tensor: #def dummy():
-        """ State Change Probability 계산 """
+        """ Calculate State Change Probability """
         # print("already padded")
         # print("xs.shape: ", xs.shape)
         xs_transposed = xs.permute(0, 2, 1)  # (B, T, D) → (B, D, T)
@@ -64,7 +64,7 @@ class StateChangeDetector(Module):
         # print("h.shape: ", h.shape)
         h = h.permute(0, 2, 1)  # (B, D/2, T) → (B, T, D/2)
         
-        # ✅ `view()` 대신 `.reshape()` 사용하여 메모리 연속성 문제 해결
+        # Using reshape
         h = torch.tanh(self.detector_layer_2(h.reshape(-1, h.shape[-1])))
         # print("after second layer")
         # print("h.shape: ", h.shape)
@@ -76,7 +76,7 @@ class StateChangeDetector(Module):
         # print("after view")
         # print("h.shape: ", h.shape)
         
-        return h.squeeze(dim=-1)  # ✅ (B, T) 형태로 반환
+        return h.squeeze(dim=-1)  # (B, T) 
 
 class EncoderDecoderAttractor(Module):
     def __init__(
@@ -465,14 +465,14 @@ class TransformerSCDEDADiarization(Module):
         dropout: float,
         vad_loss_weight: float,
         attractor_loss_ratio: float,
-        detach_attractor_loss: float,  # ✅ 디폴트 값 없음 → 앞에 배치
-        state_change_detector_dropout: float = 0.1,  # ✅ 디폴트 값 없음 → 앞에 배치
+        detach_attractor_loss: float, 
+        state_change_detector_dropout: float = 0.1,  
         seg_PIT_loss_ratio: float = 1.0,
         scd_loss_ratio: float = 1.0,
-        attractor_encoder_dropout: float = 0.1,  # ✅ 디폴트 값 있음 → 뒤에 배치
-        attractor_decoder_dropout: float = 0.1,  # ✅ 디폴트 값 있음 → 뒤에 배치
+        attractor_encoder_dropout: float = 0.1, 
+        attractor_decoder_dropout: float = 0.1, 
     ):
-        """ Transformer 기반 다중화자 다이어리제이션 모델 (EEND-EDA + SSCD) """
+        """ Transformer-based multi-speaker diarization model (EEND-EDA + SSCD) """
         self.device = device
 
         super(TransformerSCDEDADiarization, self).__init__()
@@ -670,27 +670,27 @@ class TransformerSCDEDADiarization(Module):
     def create_state_change_labels(
         self, ts: torch.Tensor, ilens: torch.Tensor, near_n_frames: int = 1
     ) -> torch.Tensor: #def dummy():
-        """SSCD Labels 생성 (Gradient 없음)"""
+        """SSCD Labels generation ( No Gradient )"""
 
         batch_size, T, C = ts.shape  
 
-        # 🔹 **상태 변화 감지** (B, T-1)
-        diff = torch.any(ts[:, 1:] != ts[:, :-1], dim=2)  # 변화 감지 (더 정확한 방식)
+        # 🔹 ** Detect Speaker State change ** (B, T-1)
+        diff = torch.any(ts[:, 1:] != ts[:, :-1], dim=2) # detect difference beteween previous frame
         scd_labels = torch.cat([torch.zeros(batch_size, 1, device=ts.device), diff.float()], dim=1)
 
-        # 🔹 **ilens 위치에 상태 변화(1) 설정**
+        # 🔹 ** Setting last label as 1 **
         last_valid_idx = ilens - 1  
         mask = torch.zeros_like(scd_labels, dtype=torch.bool)
         mask = mask.scatter(1, last_valid_idx.unsqueeze(1), 1) 
     
-        scd_labels = scd_labels.masked_fill(mask, 1)  # ✅ .detach() 제거 (필요 없음)
+        scd_labels = scd_labels.masked_fill(mask, 1)  #  delete .detach() (not necessary)
 
-        # 🔹 **Max Pooling을 사용하여 주변 프레임 확장 (Gradient 없음)**
+        # 🔹 ** Using Max Pooling to make neighbor frames as 1( No Gradient )**
         scd_labels = scd_labels.unsqueeze(1)  # (B, 1, T)
         scd_labels = F.max_pool1d(scd_labels, kernel_size=2 * near_n_frames + 1, stride=1, padding=near_n_frames)
         scd_labels = scd_labels.squeeze(1)  # (B, T)
 
-        # ✅ **Gradient 방지**
+        # ✅ ** prevent Gradient flow **
         scd_labels = scd_labels.detach()
 
         return scd_labels
