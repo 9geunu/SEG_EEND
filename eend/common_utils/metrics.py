@@ -103,7 +103,7 @@ def calculate_metrics(
     return res
 
 
-def new_metrics() -> Dict[str, float]: #def dummy():
+def new_metrics() -> Dict[str, float]: 
     metrics = {}
     for k in [
         'loss',
@@ -148,7 +148,7 @@ def update_metrics(
         acum_dict[k] += new_dict[k]
     return acum_dict
 
-def new_metrics_scd() -> Dict[str, float]: #def dummy():
+def new_metrics_scd() -> Dict[str, float]: 
     metrics = {}
     for k in [
         'loss',
