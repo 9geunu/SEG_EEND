@@ -27,7 +27,7 @@ sampling_rate: 8000
 seed: 4
 subsampling: 10
 time_shuffle: True
-train_batchsize: 8
+train_batchsize: 16
 transformer_encoder_dropout: 0.1
 transformer_encoder_n_heads: 4
 transformer_encoder_n_layers: 4
