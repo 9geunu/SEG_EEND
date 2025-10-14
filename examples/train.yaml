@@ -22,7 +22,7 @@ num_frames: 500
 num_speakers: 2
 num_workers: 8
 optimizer: noam
-output_path: experiment/baseline
+output_path: experiment/baseline/
 sampling_rate: 8000
 seed: 4
 subsampling: 10
