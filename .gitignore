@@ -1,8 +1,7 @@
 # Ignore experimental and test directories/files
-examples_sc/
-examples_previous/
+examples_*/
 experiment/
-experiment_sc/
+experiment_*/
 test.py
 
 # Optional analysis scripts (not for release)
