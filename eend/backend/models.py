@@ -53,7 +53,7 @@ class StateChangeDetector(Module):
         
         self.to(device)
 
-    def forward(self, xs: torch.Tensor) -> torch.Tensor: #def dummy():
+    def forward(self, xs: torch.Tensor) -> torch.Tensor:   
         """ Calculate State Change Probability """
         # print("already padded")
         # print("xs.shape: ", xs.shape)
@@ -319,7 +319,7 @@ class TransformerEDADiarization(Module):
         attractor_encoder_dropout: float,
         attractor_decoder_dropout: float,
         detach_attractor_loss: bool,
-    ) -> None: #def dummy():
+    ) -> None:   
         """ Self-attention-based diarization model.
         Args:
           in_size (int): Dimension of input feature vector
@@ -347,7 +347,7 @@ class TransformerEDADiarization(Module):
         self.attractor_loss_ratio = attractor_loss_ratio
         self.vad_loss_weight = vad_loss_weight
 
-    def get_embeddings(self, xs: torch.Tensor) -> torch.Tensor: #def dummy():
+    def get_embeddings(self, xs: torch.Tensor) -> torch.Tensor:   
         ilens = [x.shape[0] for x in xs]
         # xs: (B, T, F)
         pad_shape = xs.shape
@@ -486,7 +486,7 @@ class TransformerSCDEDADiarization(Module):
         self.scd_loss_ratio = scd_loss_ratio
         self.seg_PIT_loss_ratio = seg_PIT_loss_ratio
 
-    def get_embeddings(self, xs: torch.Tensor) -> torch.Tensor: #def dummy():
+    def get_embeddings(self, xs: torch.Tensor) -> torch.Tensor:   
         ilens = [x.shape[0] for x in xs]
         # xs: (B, T, F)
         pad_shape = xs.shape
@@ -500,7 +500,7 @@ class TransformerSCDEDADiarization(Module):
         self,
         xs: torch.Tensor,
         args: SimpleNamespace
-    ) -> List[torch.Tensor]:  # def dummy():
+    ) -> List[torch.Tensor]: 
 
         assert args.estimate_spk_qty_thr != -1 or \
             args.estimate_spk_qty != -1, \
@@ -569,7 +569,7 @@ class TransformerSCDEDADiarization(Module):
         ts: torch.Tensor,
         n_speakers: List[int],
         args: SimpleNamespace,
-    ) -> Tuple[torch.Tensor, torch.Tensor]: #def dummy():
+    ) -> Tuple[torch.Tensor, torch.Tensor]: 
         
         emb, ilens = self.get_embeddings(xs)
         if isinstance(ilens, list):
@@ -646,7 +646,7 @@ class TransformerSCDEDADiarization(Module):
         attractor_loss: torch.Tensor,
         vad_loss_weight: float,
         detach_attractor_loss: bool
-    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:  #def dummy():
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
 
         max_n_speakers = max(n_speakers)
         ts_padded = pad_labels(target, max_n_speakers)
@@ -670,7 +670,7 @@ class TransformerSCDEDADiarization(Module):
     
     def create_state_change_labels(
         self, ts: torch.Tensor, ilens: torch.Tensor, near_n_frames: int = 1
-    ) -> torch.Tensor: #def dummy():
+    ) -> torch.Tensor:   
         """SSCD Labels generation ( No Gradient )"""
 
         batch_size, T, C = ts.shape  
