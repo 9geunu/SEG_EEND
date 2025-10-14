@@ -788,7 +788,7 @@ if __name__ == '__main__': #def dummy():
                         args.vad_loss_weight, args.detach_attractor_loss)
                     t3 = time.perf_counter()
 
-                    # loss backward (누적 스케일)
+                    # loss backward 
                     scaled_loss = loss / accum_steps
                     done = i + 1
                     is_last_batch = (done == train_batches_qty)
