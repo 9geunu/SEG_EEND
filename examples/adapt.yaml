@@ -1,5 +1,5 @@
 # training options
-init_model_path: experiment/multi_gpu/baseline_6/models
+init_model_path: experiment/baseline/models
 init_epochs: 90-100
 attractor_loss_ratio: 1.0
 attractor_encoder_dropout: 0.1
