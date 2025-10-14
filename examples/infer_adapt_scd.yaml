@@ -9,13 +9,13 @@ frame_shift: 80
 frame_size: 200
 gpu: 0
 hidden_size: 256
-infer_data_dir: /home/cymoon/dataset/callhome/data/callhome2_spk2
+infer_data_dir: data/callhome2_spk2
 input_transform: logmel_meannorm
 median_window_length: 11
 model_type: TransformerSCDEDA
-models_path: experiment/multi_gpu/my_model/callhome_adapt_3/models
+models_path: experiment/seg_eend/callhome_adapt/models
 num_frames: -1
-rttms_dir: experiment/multi_gpu/my_model/output_rttms_callhome_3
+rttms_dir: experiment/seg_eend/output_rttms_callhome
 sampling_rate: 8000
 seed: 3
 subsampling: 10
