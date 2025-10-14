@@ -24,7 +24,7 @@ num_speakers: 2
 num_workers: 1
 optimizer: adam
 lr: 2e-5
-output_path: experiment/multi_gpu/baseline_6/callhome_adapt_3
+output_path: experiment/baseline/callhome_adapt
 sampling_rate: 8000
 seed: 4
 subsampling: 10
