@@ -178,9 +178,9 @@ class CUDAPrefetcher:
         except StopIteration:
             self.next_batch = None
             return
-        # CPU에서 pad→stack 완료
+        # pad→stack complete in cpu
         feats_cpu, labs_cpu, nspk, names = prepare_batch_on_cpu(raw, self.num_frames)
-        # 별도 CUDA stream에서 H2D
+        # in additional CUDA stream
         with torch.cuda.stream(self.stream):
             feats = feats_cpu.to(self.device, non_blocking=True)
             labs  = labs_cpu.to(self.device, non_blocking=True)
@@ -226,8 +226,8 @@ def compute_loss_and_metrics(
     base_model = model.module if hasattr(model, "module") else model
 
     if model_type == "TransformerEDA":
-        y_pred, attractor_loss = model(input, labels, n_speakers, args)  # forward는 DDP로 호출
-        loss, standard_loss = base_model.get_loss(  # <-- 여기!
+        y_pred, attractor_loss = model(input, labels, n_speakers, args)  # forward using ddp
+        loss, standard_loss = base_model.get_loss(  
             y_pred, labels, n_speakers, attractor_loss, vad_loss_weight,
             detach_attractor_loss)
         metrics = calculate_metrics(labels.detach(), y_pred.detach(), threshold=0.5)
@@ -241,10 +241,10 @@ def compute_loss_and_metrics(
 
     elif model_type == "TransformerSCDEDA":
         y_pred, seg_y_pred, attractor_loss, scd_loss = model(input, labels, n_speakers, args)
-        standard_loss = base_model.get_loss(  # <-- 여기!
+        standard_loss = base_model.get_loss(  
             y_pred, labels, n_speakers, attractor_loss, vad_loss_weight,
             detach_attractor_loss)
-        seg_PIT_loss = base_model.get_loss(  # <-- 여기!
+        seg_PIT_loss = base_model.get_loss(  
             seg_y_pred, labels, n_speakers, attractor_loss, vad_loss_weight,
             detach_attractor_loss)
         loss = standard_loss + seg_PIT_loss + scd_loss + attractor_loss
@@ -268,14 +268,14 @@ def compute_loss_and_metrics(
 
 def get_training_dataloaders(
     args: SimpleNamespace 
-) -> Tuple[DataLoader, DataLoader]: #def dummy():
+) -> Tuple[DataLoader, DataLoader]: 
     
     # === DEBUG ADDITIONS ===
     t0 = time.perf_counter()
     logging.info("[DATA] Building KaldiDiarizationDataset(train) ...")
     # === /DEBUG ADDITIONS ===
     
-    train_set = KaldiDiarizationDataset(#def dummy():
+    train_set = KaldiDiarizationDataset(
         args.train_data_dir,
         chunk_size=args.num_frames,
         context_size=args.context_size,
@@ -369,7 +369,7 @@ def get_training_dataloaders(
     return train_loader, dev_loader
 
 
-def parse_arguments() -> SimpleNamespace: #def dummy():
+def parse_arguments() -> SimpleNamespace: 
     parser = yamlargparse.ArgumentParser(description='EEND training')
     parser.add_argument('-c', '--config', help='config file path',
                         action=yamlargparse.ActionConfigFile)
@@ -458,7 +458,7 @@ def parse_arguments() -> SimpleNamespace: #def dummy():
         '--noam-scale-rule',
         default='sqrt',
         type=str,
-        choices=['linear', 'sqrt', 'step', 'hybrid'],  # <--- 'hybrid' 추가
+        choices=['linear', 'sqrt', 'step', 'hybrid'],  # option for learning rate
         help='LR scaling rule for Noam optimizer in DDP.'
     )
     parser.add_argument(
@@ -469,15 +469,15 @@ def parse_arguments() -> SimpleNamespace: #def dummy():
     
     # --- Noam scalling options ---
     parser.add_argument('--noam-k', type=int, default=0,
-                        help='효과적 k(=world_size*accum_steps) 오버라이드. 0이면 자동.')
+                        help='Override efficient k (= world_size * accum_steps).')
     parser.add_argument('--noam-alpha', type=float, default=None,
-                        help='lr_scale = k**alpha 로 강제. None이면 rule(linear/sqrt/hybrid/step)에 따름.')
+                        help='Force lr_scale = k**alpha. If None, follows the specified rule (linear/sqrt/hybrid/step).')
     parser.add_argument('--noam-lr-scale', type=float, default=None,
-                        help='lr_scale을 직접 지정(예: 2.0). 지정 시 rule/alpha 무시.')
+                        help='Manually set lr_scale (e.g., 2.0). When specified, rule/alpha are ignored.')
     parser.add_argument('--noam-step-scale', type=int, default=0,
-                        help='step_scale(스케줄 진행 배수) 오버라이드. 0이면 rule에 따름.')
+                        help='Override step_scale (multiplier for schedule progression). If 0, follows the rule.')
     parser.add_argument('--noam-warmup-scale', type=float, default=1.0,
-                        help='warmup_steps를 1/noam_warmup_scale 배로 줄임. (예: 2.0이면 warmup/2)')
+                        help='Reduce warmup_steps by a factor of 1/noam_warmup_scale (e.g., 2.0 means warmup/2).')
     args = parser.parse_args()
     return args
 
@@ -603,7 +603,7 @@ if __name__ == '__main__': #def dummy():
         for epoch in range(init_epoch, args.max_epochs):
             model.train()
             
-            # ---- Gradient Accumulation 설정 (루프 바깥에서 한 번만 선언해도 OK) ----
+            # ---- Gradient Accumulation Setting ----
             accum_steps = max(1, int(getattr(args, "accum_steps", 1)))
                         
             # ---- per-epoch accumulators ----
@@ -678,7 +678,7 @@ if __name__ == '__main__': #def dummy():
                     else:
                         scaled_loss.backward()
 
-                    # ---- step/clip 타이밍: accum_steps 마다 또는 마지막 배치에서 ----
+                    # ---- step/clip : each accum_steps or last batch ----
                     do_step = (((i + 1) % accum_steps) == 0) or (done == train_batches_qty)
                     t3 = time.perf_counter()
                     opt_ms_local = None
@@ -699,7 +699,7 @@ if __name__ == '__main__': #def dummy():
                         else:
                             optimizer.step()
 
-                        # <<< 여기 추가: step이 실제로 일어난 타이밍에만 LR 로그 >>>
+                        # <<< Add here: log LR only when an actual step occurs >>>
                         if is_main_process() and writer is not None:
                             global_step = epoch * train_batches_qty + done
                             writer.add_scalar("lrate", get_rate(optimizer), global_step)  
