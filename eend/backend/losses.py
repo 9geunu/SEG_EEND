@@ -1,8 +1,6 @@
 #!/usr/bin/env python3
 
 # Copyright 2019 Hitachi, Ltd. (author: Yusuke Fujita)
-# Copyright 2022 Brno University of Technology (authors: Federico Landini, Lukas Burget, Mireia Diez)
-# Copyright 2022 AUDIAS Universidad Autonoma de Madrid (author: Alicia Lozano-Diez)
 # Licensed under the MIT license.
 
 from itertools import permutations
