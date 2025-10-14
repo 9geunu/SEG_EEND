@@ -33,5 +33,5 @@ train_batchsize: 16
 transformer_encoder_dropout: 0.1
 transformer_encoder_n_heads: 4
 transformer_encoder_n_layers: 4
-train_data_dir: /home/cymoon/dataset/callhome/data/callhome1_spk2
-valid_data_dir: /home/cymoon/dataset/callhome/data/callhome2_spk2
+train_data_dir: data/callhome1_spk2
+valid_data_dir: data/callhome2_spk2
