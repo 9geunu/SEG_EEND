@@ -528,15 +528,16 @@ def get_training_dataloaders(
     logging.info("[DATA] Dev dataset ready in %.2fs. __len__=%d", t2 - t1, len(dev_set))
     # === /DEBUG ADDITIONS ===
 
-    Y_train, _, _ = train_set.__getitem__(0)
-    Y_dev, _, _ = dev_set.__getitem__(0)
-    assert Y_train.shape[1] == Y_dev.shape[1], \
-        f"Train features dimensionality ({Y_train.shape[1]}) and \
-        dev features dimensionality ({Y_dev.shape[1]}) differ."
-    assert Y_train.shape[1] == (
-        args.feature_dim * (1 + 2 * args.context_size)), \
-        f"Expected feature dimensionality of {args.feature_dim} \
-        but {Y_train.shape[1]} found."
+    if args.feature_stage != "cuda":
+        Y_train, _, _ = train_set.__getitem__(0)
+        Y_dev, _, _ = dev_set.__getitem__(0)
+        assert Y_train.shape[1] == Y_dev.shape[1], \
+            f"Train features dimensionality ({Y_train.shape[1]}) and \
+            dev features dimensionality ({Y_dev.shape[1]}) differ."
+        assert Y_train.shape[1] == (
+            args.feature_dim * (1 + 2 * args.context_size)), \
+            f"Expected feature dimensionality of {args.feature_dim} \
+            but {Y_train.shape[1]} found."
 
 
     # === DEBUG ADDITIONS ===
