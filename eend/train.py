@@ -247,11 +247,13 @@ def build_cuda_batch(batch: Dict[str, Any], args) -> Tuple[torch.Tensor, torch.T
     spec = spec.transpose(1, 2)  # [B, T, F]
 
     mel_fbanks = AF.melscale_fbanks(
-        n_stft=fft_size // 2 + 1,
+        n_freqs=fft_size // 2 + 1,
         n_mels=args.feature_dim,
         sample_rate=args.sampling_rate,
-        norm='slaney'
-    ).to(device=device, dtype=spec.dtype)
+        norm='slaney',
+        dtype=spec.dtype,
+        device=device,
+    )
     mel = torch.matmul(spec, mel_fbanks.T)
     mel = torch.log10(torch.clamp(mel, min=1e-10))
 
