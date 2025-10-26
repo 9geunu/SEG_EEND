@@ -9,7 +9,7 @@ import common_utils.features as features
 import common_utils.kaldi_data as kaldi_data
 import numpy as np
 import torch
-from typing import Tuple
+from typing import List, Tuple
 import logging
 import soundfile as sf
 
@@ -50,6 +50,7 @@ class KaldiDiarizationDataset(torch.utils.data.Dataset):
         use_last_samples: bool,
         min_length: int,
         dtype: type = np.float32,
+        feature_stage: str = "dataset",
     ):
         self.data_dir = data_dir
         self.dtype = dtype
@@ -65,6 +66,7 @@ class KaldiDiarizationDataset(torch.utils.data.Dataset):
         self.chunk_indices = []
 
         self.data = kaldi_data.KaldiData(self.data_dir)
+        self.feature_stage = feature_stage
 
         # make chunk indices: filepath, start_frame, end_frame
         for rec in self.data.wavs:
@@ -96,6 +98,9 @@ class KaldiDiarizationDataset(torch.utils.data.Dataset):
 
     def __getitem__(self, i: int) -> Tuple[np.ndarray, np.ndarray]:
         rec, st, ed = self.chunk_indices[i]
+        if self.feature_stage == "cuda":
+            return self._getitem_wave(rec, st, ed)
+
         Y, T = features.get_labeledSTFT(
             self.data,
             rec,
@@ -119,3 +124,39 @@ class KaldiDiarizationDataset(torch.utils.data.Dataset):
 
         return torch.from_numpy(np.copy(Y_ss)), torch.from_numpy(
             np.copy(T_ss)), rec
+
+    def _getitem_wave(self, rec: str, st: int, ed: int):
+        data, rate = self.data.load_wav(
+            rec, st * self.frame_shift, ed * self.frame_shift)
+        assert rate == self.sampling_rate, (
+            f"Sampling rate mismatch for {rec}: expected {self.sampling_rate}, got {rate}")
+
+        segments = self.data.segments.get(rec, []) if isinstance(self.data.segments, dict) else []
+        speakers = np.unique([
+            self.data.utt2spk[seg['utt']] for seg in segments
+        ]).tolist()
+        speaker_map = {spk: idx for idx, spk in enumerate(speakers)}
+
+        chunk_frames = ed - st
+        spans: List[Tuple[int, int, int]] = []  # (speaker_idx, start_frame, end_frame)
+        for seg in segments:
+            spk_id = self.data.utt2spk[seg['utt']]
+            speaker_index = speaker_map[spk_id]
+            start_frame = int(np.rint(seg['st'] * rate / self.frame_shift))
+            end_frame = int(np.rint(seg['et'] * rate / self.frame_shift))
+
+            overlap_start = max(start_frame, st)
+            overlap_end = min(end_frame, ed)
+            if overlap_start < overlap_end:
+                rel_start = overlap_start - st
+                rel_end = overlap_end - st
+                spans.append((speaker_index, rel_start, rel_end))
+
+        sample = {
+            'waveform': torch.from_numpy(np.copy(data)).float(),
+            'spans': spans,
+            'names': rec,
+            'chunk_frames': chunk_frames,
+            'speaker_count': len(speakers)
+        }
+        return sample

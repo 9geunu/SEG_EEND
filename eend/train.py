@@ -34,6 +34,7 @@ import random
 import torch
 import logging
 import yamlargparse
+import torchaudio.functional as AF
 
 # === DEBUG ADDITIONS ===
 import sys
@@ -146,8 +147,24 @@ def mem_report(tag: str, device: torch.device):
 
 # ===== GPU Prefetcher & CPU prepare =====
 
-def prepare_batch_on_cpu(batch, num_frames):
+def _prepare_waveform_batch(batch: Dict[str, Any]) -> Dict[str, Any]:
+    waveforms = batch['waveforms']
+    lengths = torch.tensor([w.shape[0] for w in waveforms], dtype=torch.long)
+    padded = torch.nn.utils.rnn.pad_sequence(waveforms, batch_first=True)
+    return {
+        'audio': padded,
+        'lengths': lengths,
+        'spans': batch['spans'],
+        'names': batch.get('names', None),
+        'speaker_count': batch.get('speaker_count', None),
+    }
+
+
+def prepare_batch_on_cpu(batch, num_frames, feature_stage: str):
     """Pad and stack on CPU, return CPU tensors."""
+    if feature_stage == "cuda":
+        return _prepare_waveform_batch(batch)
+
     features_list = batch['xs']
     labels_list   = batch['ts']
     n_speakers = np.asarray([
@@ -160,15 +177,135 @@ def prepare_batch_on_cpu(batch, num_frames):
 
     features = torch.stack(features_list)   # CPU tensor (equal sizes)
     labels   = torch.stack(labels_list)     # CPU tensor (equal sizes)
-    return features, labels, n_speakers, batch.get('names', None)
+    return {
+        'xs': features,
+        'ts': labels,
+        'nspk': n_speakers,
+        'names': batch.get('names', None)
+    }
+
+
+def _fft_size(frame_size: int) -> int:
+    return 1 << (frame_size - 1).bit_length()
+
+
+def _valid_frame_count(num_samples: int, fft_size: int, frame_shift: int) -> int:
+    if num_samples <= 0:
+        return 0
+    pad = fft_size // 2
+    n = num_samples + 2 * pad - fft_size
+    if n < 0:
+        return 0
+    frames = n // frame_shift + 1
+    if num_samples % frame_shift == 0:
+        frames = max(frames - 1, 0)
+    return frames
+
+
+def _splice_tensor(feat: torch.Tensor, context: int) -> torch.Tensor:
+    if context <= 0:
+        return feat
+    padded = torch.nn.functional.pad(feat, (0, 0, context, context))
+    unfolded = padded.unfold(0, 2 * context + 1, 1)
+    return unfolded.reshape(feat.shape[0], -1)
+
+
+def _subsample_tensor(t: torch.Tensor, subsampling: int) -> torch.Tensor:
+    if subsampling <= 1:
+        return t
+    return t[::subsampling]
+
+
+def _select_top_speakers(labels: torch.Tensor, max_speakers: int) -> torch.Tensor:
+    if max_speakers and labels.shape[1] > max_speakers:
+        totals = labels.sum(dim=0)
+        topk = torch.topk(totals, k=max_speakers).indices
+        topk, _ = torch.sort(topk)
+        labels = labels[:, topk]
+    return labels
+
+
+def build_cuda_batch(batch: Dict[str, Any], args) -> Tuple[torch.Tensor, torch.Tensor, np.ndarray]:
+    audio = batch['audio']  # [B, T]
+    lengths = batch['lengths']
+    spans_batch = batch['spans']
+    device = audio.device
+
+    fft_size = _fft_size(args.frame_size)
+    window = torch.hann_window(args.frame_size, device=device, dtype=audio.dtype)
+    stft = torch.stft(
+        audio,
+        n_fft=fft_size,
+        hop_length=args.frame_shift,
+        win_length=args.frame_size,
+        window=window,
+        return_complex=True,
+        center=True,
+        pad_mode='reflect'
+    )
+    spec = stft.abs() ** 2  # [B, F, T]
+    spec = spec.transpose(1, 2)  # [B, T, F]
+
+    mel_fbanks = AF.melscale_fbanks(
+        n_stft=fft_size // 2 + 1,
+        n_mels=args.feature_dim,
+        sample_rate=args.sampling_rate,
+        norm='slaney'
+    ).to(device=device, dtype=spec.dtype)
+    mel = torch.matmul(spec, mel_fbanks.T)
+    mel = torch.log10(torch.clamp(mel, min=1e-10))
+
+    if args.input_transform == 'logmel_meannorm':
+        mel = mel - mel.mean(dim=1, keepdim=True)
+    elif args.input_transform == 'logmel_meanvarnorm':
+        mel = mel - mel.mean(dim=1, keepdim=True)
+        std = torch.clamp(mel.std(dim=1, keepdim=True), min=1e-5)
+        mel = mel / std
+
+    feature_list: List[torch.Tensor] = []
+    label_list: List[torch.Tensor] = []
+    speaker_counts: List[int] = []
+
+    for idx in range(audio.size(0)):
+        num_frames = min(mel.shape[1], _valid_frame_count(int(lengths[idx].item()), fft_size, args.frame_shift))
+        num_frames = max(num_frames, 1)
+        feat = mel[idx, :num_frames, :]
+
+        max_spk = max([span[0] for span in spans_batch[idx]], default=-1) + 1
+        max_spk = max(max_spk, 1)
+        labels = torch.zeros((num_frames, max_spk), device=device, dtype=feat.dtype)
+        for speaker_index, start_f, end_f in spans_batch[idx]:
+            start = max(0, min(start_f, num_frames))
+            end = max(0, min(end_f, num_frames))
+            if end > start and speaker_index < max_spk:
+                labels[start:end, speaker_index] = 1.0
+
+        feat = _splice_tensor(feat, args.context_size)
+        feat = _subsample_tensor(feat, args.subsampling)
+        labels = _subsample_tensor(labels, args.subsampling)
+        labels = _select_top_speakers(labels, args.num_speakers)
+
+        feature_list.append(feat)
+        label_list.append(labels)
+        speaker_counts.append(labels.shape[1])
+
+    feature_list, label_list = pad_sequence(feature_list, label_list, args.num_frames)
+    max_speakers = max(speaker_counts) if speaker_counts else 0
+    label_list = pad_labels(label_list, max_speakers)
+
+    features = torch.stack(feature_list)
+    labels = torch.stack(label_list)
+    n_speakers = np.asarray(speaker_counts)
+    return features, labels, n_speakers
 
 class CUDAPrefetcher:
     """Pad/stack on CPU, then prefetch to CUDA stream."""
-    def __init__(self, loader, device, num_frames):
+    def __init__(self, loader, device, num_frames, feature_stage: str = "dataset"):
         self.loader = iter(loader)
         self.stream = torch.cuda.Stream()
         self.device = device
         self.num_frames = num_frames
+        self.feature_stage = feature_stage
         self.next_batch = None
         self.preload()
 
@@ -179,19 +316,34 @@ class CUDAPrefetcher:
             self.next_batch = None
             return
         # pad→stack complete in cpu
-        feats_cpu, labs_cpu, nspk, names = prepare_batch_on_cpu(raw, self.num_frames)
+        batch_cpu = prepare_batch_on_cpu(raw, self.num_frames, self.feature_stage)
         # in additional CUDA stream
         with torch.cuda.stream(self.stream):
-            feats = feats_cpu.to(self.device, non_blocking=True)
-            labs  = labs_cpu.to(self.device, non_blocking=True)
-            self.next_batch = {'xs': feats, 'ts': labs, 'nspk': nspk, 'names': names}
+            if self.feature_stage == "cuda":
+                audio = batch_cpu['audio'].to(self.device, non_blocking=True)
+                lengths = batch_cpu['lengths'].to(self.device, non_blocking=True)
+                self.next_batch = {
+                    'audio': audio,
+                    'lengths': lengths,
+                    'spans': batch_cpu['spans'],
+                    'speaker_count': batch_cpu['speaker_count'],
+                    'names': batch_cpu['names']
+                }
+            else:
+                feats = batch_cpu['xs'].to(self.device, non_blocking=True)
+                labs  = batch_cpu['ts'].to(self.device, non_blocking=True)
+                self.next_batch = {'xs': feats, 'ts': labs, 'nspk': batch_cpu['nspk'], 'names': batch_cpu['names']}
 
     def next(self):
         torch.cuda.current_stream().wait_stream(self.stream)
         batch = self.next_batch
         if batch is not None:
-            for k in ('xs', 'ts'):
-                batch[k].record_stream(torch.cuda.current_stream())
+            if self.feature_stage == "cuda":
+                batch['audio'].record_stream(torch.cuda.current_stream())
+                batch['lengths'].record_stream(torch.cuda.current_stream())
+            else:
+                for k in ('xs', 'ts'):
+                    batch[k].record_stream(torch.cuda.current_stream())
         self.preload()
         return batch
     
@@ -209,6 +361,15 @@ def _convert(
     return {'xs': [x for x, _, _ in batch],
             'ts': [t for _, t, _ in batch],
             'names': [r for _, _, r in batch]}
+
+
+def _convert_waveform(batch: List[Dict[str, Any]]) -> Dict[str, Any]:
+    return {
+        'waveforms': [sample['waveform'] for sample in batch],
+        'spans': [sample['spans'] for sample in batch],
+        'names': [sample['names'] for sample in batch],
+        'speaker_count': [sample['speaker_count'] for sample in batch]
+    }
 
 
 def compute_loss_and_metrics(
@@ -289,6 +450,7 @@ def get_training_dataloaders(
         subsampling=args.subsampling,
         use_last_samples=args.use_last_samples,
         min_length=args.min_length,
+        feature_stage=args.feature_stage,
     )
 
     dev_set = KaldiDiarizationDataset(
@@ -305,6 +467,7 @@ def get_training_dataloaders(
         subsampling=args.subsampling,
         use_last_samples=args.use_last_samples,
         min_length=args.min_length,
+        feature_stage=args.feature_stage,
     )
         
     # === DEBUG ADDITIONS ===
@@ -324,9 +487,11 @@ def get_training_dataloaders(
     # honor user-provided worker setting but fall back to 4 if it was 0/negative
     train_num_workers = args.num_workers if args.num_workers and args.num_workers > 0 else 4
 
+    collate_fn = _convert_waveform if args.feature_stage == "cuda" else _convert
+
     loader_kwargs = dict(
         batch_size=args.train_batchsize,
-        collate_fn=_convert,
+        collate_fn=collate_fn,
         sampler=train_sampler,
         shuffle=(train_sampler is None),
         worker_init_fn=_init_fn,
@@ -350,7 +515,7 @@ def get_training_dataloaders(
     dev_loader = DataLoader(
         dev_set,
         batch_size=args.dev_batchsize,
-        collate_fn=_convert,
+        collate_fn=collate_fn,
         num_workers=1,
         sampler=dev_sampler,
         shuffle=False,
@@ -392,6 +557,8 @@ def parse_arguments() -> SimpleNamespace:
     parser.add_argument('--encoder-units', type=int,
                         help='number of units in the encoder')
     parser.add_argument('--feature-dim', type=int)
+    parser.add_argument('--feature-stage', default='dataset', choices=['dataset', 'cuda'],
+                        help='Where to compute log-mel features (dataset=CPU default, cuda=in-training).')
     parser.add_argument('--frame-shift', type=int)
     parser.add_argument('--frame-size', type=int)
     parser.add_argument('--gpu', '-g', default=-1, type=int,
@@ -660,9 +827,10 @@ if __name__ == '__main__':
             
             # ===== Prefetcher on CUDA =====
             use_prefetch = (args.device.type == "cuda")
+            cuda_pipeline = use_prefetch and args.feature_stage == "cuda"
             
             if use_prefetch:
-                prefetcher = CUDAPrefetcher(train_loader, args.device, args.num_frames)
+                prefetcher = CUDAPrefetcher(train_loader, args.device, args.num_frames, feature_stage=args.feature_stage)
 
                 batch = prefetcher.next()
                 i = 0
@@ -671,9 +839,12 @@ if __name__ == '__main__':
                     t0 = time.perf_counter()
 
                     # Already on GPU and padded/stacked on CPU
-                    features = batch['xs']      # [B, T, D] on CUDA
-                    labels   = batch['ts']      # [B, T, S] on CUDA
-                    n_speakers = batch['nspk']  # numpy array/list
+                    if cuda_pipeline:
+                        features, labels, n_speakers = build_cuda_batch(batch, args)
+                    else:
+                        features = batch['xs']      # [B, T, D] on CUDA
+                        labels   = batch['ts']      # [B, T, S] on CUDA
+                        n_speakers = batch['nspk']  # numpy array/list
                     t1 = time.perf_counter()
                     
                     loss, acum_train_metrics, batch_log = compute_loss_and_metrics(

@@ -9,6 +9,7 @@ encoder_units: 2048
 feature_dim: 23
 frame_shift: 80
 frame_size: 200
+feature_stage: cuda
 use_last_samples: True
 gpu: 1
 gradclip: 5

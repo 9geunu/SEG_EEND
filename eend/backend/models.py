@@ -444,8 +444,12 @@ def pad_labels(ts: torch.Tensor, out_size: int) -> torch.Tensor:
     for _, t in enumerate(ts):
         if t.shape[1] < out_size:
             # padding
-            ts_padded.append(torch.cat((t, -1 * torch.ones((
-                t.shape[0], out_size - t.shape[1]))), dim=1))
+            pad_tensor = -1 * torch.ones(
+                (t.shape[0], out_size - t.shape[1]),
+                dtype=t.dtype,
+                device=t.device
+            )
+            ts_padded.append(torch.cat((t, pad_tensor), dim=1))
         elif t.shape[1] > out_size:
             # truncate
             ts_padded.append(t[:, :out_size].float())
