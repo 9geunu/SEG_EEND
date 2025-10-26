@@ -250,10 +250,8 @@ def build_cuda_batch(batch: Dict[str, Any], args) -> Tuple[torch.Tensor, torch.T
         n_freqs=fft_size // 2 + 1,
         n_mels=args.feature_dim,
         sample_rate=args.sampling_rate,
-        norm='slaney',
-        dtype=spec.dtype,
-        device=device,
-    )
+        norm='slaney'
+    ).to(device=device, dtype=spec.dtype)
     mel = torch.matmul(spec, mel_fbanks.T)
     mel = torch.log10(torch.clamp(mel, min=1e-10))
 

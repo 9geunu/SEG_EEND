@@ -717,10 +717,18 @@ def pad_sequence(
         length = features[i].shape[0]
         if length < seq_len:
             extend = seq_len - length
-            features_padded.append(torch.cat((features[i], -torch.ones((
-                extend, features[i].shape[1]))), dim=0))
-            labels_padded.append(torch.cat((labels[i], -torch.ones((
-                extend, labels[i].shape[1]))), dim=0))
+            feat_pad = -torch.ones(
+                (extend, features[i].shape[1]),
+                dtype=features[i].dtype,
+                device=features[i].device,
+            )
+            lab_pad = -torch.ones(
+                (extend, labels[i].shape[1]),
+                dtype=labels[i].dtype,
+                device=labels[i].device,
+            )
+            features_padded.append(torch.cat((features[i], feat_pad), dim=0))
+            labels_padded.append(torch.cat((labels[i], lab_pad), dim=0))
         elif length > seq_len:
             raise (f"Sequence of length {length} was received but only "
                    "{seq_len} was expected.")
