@@ -248,6 +248,8 @@ def build_cuda_batch(batch: Dict[str, Any], args) -> Tuple[torch.Tensor, torch.T
 
     mel_fbanks = AF.melscale_fbanks(
         n_freqs=fft_size // 2 + 1,
+        f_min=0.0,
+        f_max=float(args.sampling_rate) / 2.0,
         n_mels=args.feature_dim,
         sample_rate=args.sampling_rate,
         norm='slaney'
