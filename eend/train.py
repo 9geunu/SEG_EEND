@@ -254,7 +254,11 @@ def build_cuda_batch(batch: Dict[str, Any], args) -> Tuple[torch.Tensor, torch.T
         sample_rate=args.sampling_rate,
         norm='slaney'
     ).to(device=device, dtype=spec.dtype)
-    mel = torch.matmul(spec, mel_fbanks.T)
+    if mel_fbanks.shape[0] != spec.shape[2]:
+        raise RuntimeError(
+            f"Mel filter mismatch: spec_dim={spec.shape[2]} vs fbanks={mel_fbanks.shape[0]}"
+        )
+    mel = torch.matmul(spec, mel_fbanks)
     mel = torch.log10(torch.clamp(mel, min=1e-10))
 
     if args.input_transform == 'logmel_meannorm':
