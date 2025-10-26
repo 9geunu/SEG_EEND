@@ -321,17 +321,20 @@ def get_training_dataloaders(
     train_sampler = DistributedSampler(train_set, get_world_size(), get_rank(), shuffle=True) if use_ddp else None
     dev_sampler   = DistributedSampler(dev_set,   get_world_size(), get_rank(), shuffle=False) if use_ddp else None
                    
+    # honor user-provided worker setting but fall back to 4 if it was 0/negative
+    train_num_workers = args.num_workers if args.num_workers and args.num_workers > 0 else 4
+
     train_loader = DataLoader(
         train_set,
         batch_size=args.train_batchsize,
         collate_fn=_convert,
-        num_workers=min(max(args.num_workers, 4), 6),  # RECOMMENDED 4~6
+        num_workers=train_num_workers,
         sampler=train_sampler,
         shuffle=(train_sampler is None),
         worker_init_fn=_init_fn,
         pin_memory=pin,
-        persistent_workers=False,   
-        prefetch_factor=2,         
+        persistent_workers=False,
+        prefetch_factor=2,
     )
     
     dev_loader = DataLoader(
