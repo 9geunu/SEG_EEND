@@ -324,17 +324,27 @@ def get_training_dataloaders(
     # honor user-provided worker setting but fall back to 4 if it was 0/negative
     train_num_workers = args.num_workers if args.num_workers and args.num_workers > 0 else 4
 
-    train_loader = DataLoader(
-        train_set,
+    loader_kwargs = dict(
         batch_size=args.train_batchsize,
         collate_fn=_convert,
-        num_workers=train_num_workers,
         sampler=train_sampler,
         shuffle=(train_sampler is None),
         worker_init_fn=_init_fn,
         pin_memory=pin,
-        persistent_workers=False,
-        prefetch_factor=2,
+    )
+
+    if train_num_workers > 0:
+        loader_kwargs.update({
+            'num_workers': train_num_workers,
+            'prefetch_factor': max(2, getattr(args, 'prefetch_factor', 2)),
+            'persistent_workers': getattr(args, 'persistent_workers', False),
+        })
+    else:
+        loader_kwargs['num_workers'] = 0
+
+    train_loader = DataLoader(
+        train_set,
+        **loader_kwargs,
     )
     
     dev_loader = DataLoader(
@@ -415,6 +425,10 @@ def parse_arguments() -> SimpleNamespace:
                         help='maximum number of speakers allowed')
     parser.add_argument('--num-workers', default=1, type=int,
                         help='number of workers in train DataLoader')
+    parser.add_argument('--prefetch-factor', default=2, type=int,
+                        help='batches prefetched per worker (train loader)')
+    parser.add_argument('--persistent-workers', action='store_true',
+                        help='keep DataLoader workers alive between epochs')
     parser.add_argument('--optimizer', default='adam', type=str)
     parser.add_argument('--output-path', type=str)
     parser.add_argument('--sampling-rate', type=int)

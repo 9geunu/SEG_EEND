@@ -11,6 +11,19 @@ import numpy as np
 import librosa
 
 
+_mel_filter_cache = {}
+
+
+def _get_mel_filter(sr: int, n_fft: int, n_mels: int, dtype: type):
+    """Cache mel filterbanks so workers do not rebuild them every batch."""
+    key = (sr, n_fft, n_mels, dtype)
+    filt = _mel_filter_cache.get(key)
+    if filt is None:
+        filt = librosa.filters.mel(sr=sr, n_fft=n_fft, n_mels=n_mels, dtype=dtype)
+        _mel_filter_cache[key] = filt
+    return filt
+
+
 def get_labeledSTFT(
     kaldi_obj: KaldiData,
     rec: str,
@@ -163,7 +176,7 @@ def transform(
     Y = np.abs(Y)
     if transform_type.startswith('logmel'):
         n_fft = 2 * (Y.shape[1] - 1)
-        mel_basis = librosa.filters.mel(sr=sampling_rate, n_fft=n_fft, n_mels=feature_dim,dtype=np.float32)
+        mel_basis = _get_mel_filter(sampling_rate, n_fft, feature_dim, dtype)
         Y = np.dot(Y ** 2, mel_basis.T)
         Y = np.log10(np.maximum(Y, 1e-10))
         if transform_type == 'logmel_meannorm':
