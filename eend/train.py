@@ -1111,7 +1111,10 @@ if __name__ == '__main__':
     
                 for i, batch in enumerate(dev_loader):
                     if args.feature_stage == "cuda":
-                        features, labels, n_speakers = build_cuda_batch(batch, args)
+                        wave_batch = prepare_batch_on_cpu(batch, args.num_frames, "cuda")
+                        wave_batch['audio'] = wave_batch['audio'].to(args.device, non_blocking=True)
+                        wave_batch['lengths'] = wave_batch['lengths'].to(args.device, non_blocking=True)
+                        features, labels, n_speakers = build_cuda_batch(wave_batch, args)
                     else:
                         features = batch['xs']
                         labels = batch['ts']
