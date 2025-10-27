@@ -1110,18 +1110,21 @@ if __name__ == '__main__':
                 dev_der_sum  = 0.0
     
                 for i, batch in enumerate(dev_loader):
-                    features = batch['xs']
-                    labels = batch['ts']
-                    n_speakers = np.asarray([
-                        max(torch.where(t.sum(0) != 0)[0]) + 1 if t.sum() > 0 else 0
-                        for t in labels
-                    ])
-                    max_n_speakers = max(n_speakers) if len(n_speakers) else 0
-                    features, labels = pad_sequence(features, labels, args.num_frames)
-                    labels = pad_labels(labels, max_n_speakers)
+                    if args.feature_stage == "cuda":
+                        features, labels, n_speakers = build_cuda_batch(batch, args)
+                    else:
+                        features = batch['xs']
+                        labels = batch['ts']
+                        n_speakers = np.asarray([
+                            max(torch.where(t.sum(0) != 0)[0]) + 1 if t.sum() > 0 else 0
+                            for t in labels
+                        ])
+                        max_n_speakers = max(n_speakers) if len(n_speakers) else 0
+                        features, labels = pad_sequence(features, labels, args.num_frames)
+                        labels = pad_labels(labels, max_n_speakers)
 
-                    features = torch.stack(features).to(args.device, non_blocking=True)
-                    labels   = torch.stack(labels).to(args.device, non_blocking=True)
+                        features = torch.stack(features).to(args.device, non_blocking=True)
+                        labels   = torch.stack(labels).to(args.device, non_blocking=True)
 
                     # capture batch_log to accumulate proper averages
                     _, acum_dev_metrics, batch_log = compute_loss_and_metrics(
