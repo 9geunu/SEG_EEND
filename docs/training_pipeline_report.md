@@ -29,3 +29,26 @@
   2. 워커/프리패치 조정이나 chunk 길이 최적화로 RAM 사용량 관리.
   3. CPU vs GPU 파이프라인 출력 비교 테스트 자동화.
   4. wave-level augmentation 등 GPU에서의 추가 연산 실험.
+
+- **cuDNN 재활성화**: `torch.backends.cudnn.enabled = True`로 학습 루프가 다시 cuDNN 커널을 사용하도록 수정(결정성 보존을 위해 `deterministic=True`, `benchmark=False` 유지). 이 변경 이후 미니배치 처리 시간이 0.42 s → 0.16 s로 단축되고, GPU 활용률이 40 % → 44–46 %로 상승했다. GPU가 데이터를 더 빨리 소비하면서 호스트 큐에 머무는 배치 수가 줄어 RAM 점유도 21 GiB → 7 GiB 수준까지 자연스럽게 감소.
+- **DataLoader 메모리 절감**:
+  - `prefetch_factor`를 CLI 값 그대로 사용하게 해 워커당 최대 1개의 배치만 선적하도록 조정. (이전에는 코드가 강제로 ≥2로 고정돼 워커×배치수만큼 파형이 메모리에 상주.)
+  - 기본 `num_workers`를 CPU 코어 수의 1/4로 계산하고, 필요 시만 증설하도록 해 과도한 프로세스 스폰을 방지.
+  - 새로운 `--multiprocessing-context` 인자로 Linux 기본값을 `fork`로 설정해 Kaldi 메타데이터를 copy-on-write로 공유. 이로써 32 워커 환경에서 30 GiB까지 치솟던 시스템 RAM 사용량이 7 GiB 전후로 안정화.
+- **검증 루프 정렬**: `feature_stage="cuda"`일 때 개발(검증) 데이터도 학습 경로와 동일한 GPU 전처리를 거치도록 `prepare_batch_on_cpu` → CUDA 전송 → `build_cuda_batch` 순서를 재사용. 덕분에 train/dev 모두 동일한 파이프라인에서 측정되어 성능 비교가 깔끔해지고, 검증 단계에서의 CPU 작업 대기도 감소했다.
+- **현재 고정 하이퍼파라미터 커맨드**:
+  
+  ```bash
+  torchrun \
+    --nproc_per_node=1 \
+    --max_restarts=0 \
+    --standalone \
+    --tee 3 \
+    eend/train.py -c examples/train.yaml --ddp --noam-k 1 \
+    --train-batchsize 32 \
+    --accum-steps 2 \
+    --prefetch-factor 1 \
+    --multiprocessing-context fork
+  ```
+
+  위 커맨드를 기준선으로 삼아 baseline 및 경량화 모델을 모두 동일 조건에서 학습 중.
