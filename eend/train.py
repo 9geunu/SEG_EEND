@@ -28,6 +28,7 @@ from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 from types import SimpleNamespace
 from typing import Any, Dict, List, Tuple
+import multiprocessing as py_mp
 import numpy as np
 import os
 import random
@@ -490,8 +491,9 @@ def get_training_dataloaders(
     train_sampler = DistributedSampler(train_set, get_world_size(), get_rank(), shuffle=True) if use_ddp else None
     dev_sampler   = DistributedSampler(dev_set,   get_world_size(), get_rank(), shuffle=False) if use_ddp else None
                    
-    # honor user-provided worker setting but fall back to 4 if it was 0/negative
-    train_num_workers = args.num_workers if args.num_workers and args.num_workers > 0 else 4
+    # honor user-provided worker setting but fall back to a conservative default when unset
+    default_workers = max(1, (os.cpu_count() or 1) // 4)
+    train_num_workers = args.num_workers if args.num_workers and args.num_workers > 0 else default_workers
 
     collate_fn = _convert_waveform if args.feature_stage == "cuda" else _convert
 
@@ -507,9 +509,16 @@ def get_training_dataloaders(
     if train_num_workers > 0:
         loader_kwargs.update({
             'num_workers': train_num_workers,
-            'prefetch_factor': max(2, getattr(args, 'prefetch_factor', 2)),
+            'prefetch_factor': getattr(args, 'prefetch_factor', 2),
             'persistent_workers': getattr(args, 'persistent_workers', False),
         })
+        preferred_ctx = getattr(args, 'multiprocessing_context', None)
+        if preferred_ctx:
+            loader_kwargs['multiprocessing_context'] = preferred_ctx
+        else:
+            available_methods = py_mp.get_all_start_methods()
+            if 'fork' in available_methods:
+                loader_kwargs['multiprocessing_context'] = 'fork'
     else:
         loader_kwargs['num_workers'] = 0
 
@@ -597,12 +606,15 @@ def parse_arguments() -> SimpleNamespace:
                         help='number of frames in one utterance')
     parser.add_argument('--num-speakers', type=int,
                         help='maximum number of speakers allowed')
-    parser.add_argument('--num-workers', default=1, type=int,
+    parser.add_argument('--num-workers', default=0, type=int,
                         help='number of workers in train DataLoader')
     parser.add_argument('--prefetch-factor', default=2, type=int,
                         help='batches prefetched per worker (train loader)')
     parser.add_argument('--persistent-workers', action='store_true',
                         help='keep DataLoader workers alive between epochs')
+    parser.add_argument('--multiprocessing-context', type=str,
+                        choices=py_mp.get_all_start_methods(),
+                        help='override DataLoader multiprocessing context (e.g., fork, spawn)')
     parser.add_argument('--optimizer', default='adam', type=str)
     parser.add_argument('--output-path', type=str)
     parser.add_argument('--sampling-rate', type=int)
