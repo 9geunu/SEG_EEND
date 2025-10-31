@@ -20,10 +20,20 @@
    - `infer.py`에서 `compute_torch_logmel`을 사용하도록 업데이트해 CPU 기반 추론(float/INT8)의 입력 분포를 학습 시 구성과 동일하게 맞춤.
    - `--feature-stage` 옵션을 추가해 필요 시 기존 CPU feature 경로(`dataset`)로도 fallback 가능.
 
-5. **양자화 평가 (진행 예정)**
+5. **실험 케이스 정리**
+   - **Case A (baseline 설정)**
+     - 명령: `python eend/infer.py -c examples/infer.yaml --feature-stage cuda`
+     - 평가: `dscore` → DER ≈ 39.5%, JER ≈ 18.6% → 전처리 정렬 전 대비는 크게 개선됐으나 화자 수 추정 미조정으로 일부 샘플 DER이 높음.
+   - **Case B (auto speaker qty)**
+     - 명령: `python eend/infer.py -c examples/infer.yaml --feature-stage cuda --estimate-spk-qty -1 --estimate-spk-qty-thr 0.5`
+     - 평가: `dscore` → DER ≈ 7.48%, JER ≈ 12.1%, B3-F1 ≈ 0.79 → 화자 수를 임계값 기반으로 추정하면서 DER이 크게 하락.
+   - 파라미터 튜닝 목표: `estimate_spk_qty_thr`를 dev 기준으로 추가 그리드 탐색(0.3~0.6)하고, 필요 시 `--threshold`·`--median-window-length`도 재조정.
+
+6. **양자화 평가 (진행 예정)**
    - 전처리 동등성을 확보한 뒤 float vs. INT8 모델을 CPU에서 추론해 DER을 비교하고, 양자화 영향만 측정한다.
-   - 이후 필요 시 GPU 추론 옵션(`--feature-stage cuda`)을 사용해 성능 검증 및 문서화를 진행한다.
+   - 이후 `--feature-stage cuda`를 유지해 GPU 학습과 동일한 파이프라인에서 INT8 결과를 분석한다.
 
 ## 남은 작업
+- `estimate_spk_qty_thr`, `threshold`, `median_window_length` 등에 대한 dev 튜닝으로 DER 재최적화.
 - CPU 기반 float/INT8 DER 측정 및 결과 기록.
-- 필요 시 문서/예제 명령 업데이트.
+- 필요 시 문서/예제 명령 업데이트 및 INT8 관련 배포 문서화.

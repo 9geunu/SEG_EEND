@@ -255,6 +255,29 @@ if __name__ == '__main__':
     model = average_checkpoints(
         args.device, model, args.models_path, args.epochs)
 
+    # Save a float32 snapshot for comparison even without quantization
+    epochs_tag = (args.epochs or "latest").replace(',', '_').replace('-', '_').replace(' ', '')
+    try:
+        models_root = Path(args.models_path).expanduser().resolve()
+        base_dir = models_root if models_root.is_dir() else models_root.parent
+        float_dir = base_dir / "infer" / "model"
+        float_dir.mkdir(parents=True, exist_ok=True)
+        float_path = float_dir / f"float_epochs_{epochs_tag}.pt"
+        torch.save({
+            "model_state": model.state_dict(),
+            "metadata": {
+                "source_models_path": args.models_path,
+                "epochs": args.epochs,
+                "quantization": {
+                    "method": "none",
+                    "dtype": "torch.float32",
+                },
+            },
+        }, float_path)
+        logging.info("[FLOAT] Saved baseline model snapshot to %s", float_path)
+    except Exception as exc:  # noqa: BLE001 - log and continue
+        logging.warning("[FLOAT] Failed to save float32 snapshot: %s", exc)
+
     if args.quantize_dynamic:
         if args.device.type != "cpu":
             raise ValueError("Dynamic quantization only supports CPU inference.")
@@ -267,7 +290,6 @@ if __name__ == '__main__':
         quant_dir = Path("experiment") / "quantized" / "models"
         quant_dir.mkdir(parents=True, exist_ok=True)
 
-        epochs_tag = (args.epochs or "latest").replace(',', '_').replace('-', '_').replace(' ', '')
         quant_path = quant_dir / f"quantized_epochs_{epochs_tag}.pt"
 
         torch.save({
