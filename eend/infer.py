@@ -258,11 +258,9 @@ if __name__ == '__main__':
     # Save a float32 snapshot for comparison even without quantization
     epochs_tag = (args.epochs or "latest").replace(',', '_').replace('-', '_').replace(' ', '')
     try:
-        models_root = Path(args.models_path).expanduser().resolve()
-        base_dir = models_root if models_root.is_dir() else models_root.parent
-        float_dir = base_dir / "infer" / "model"
+        float_dir = Path("experiment") / "quantized" / "models"
         float_dir.mkdir(parents=True, exist_ok=True)
-        float_path = float_dir / f"float_epochs_{epochs_tag}.pt"
+        float_path = float_dir / f"float_snapshot_epochs_{epochs_tag}.pt"
         torch.save({
             "model_state": model.state_dict(),
             "metadata": {
