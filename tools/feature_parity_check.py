@@ -12,6 +12,12 @@ from typing import Dict, List, Tuple
 import torch
 import yaml
 
+REPO_ROOT = Path(__file__).resolve().parents[1]
+for candidate in (REPO_ROOT, REPO_ROOT / "eend"):
+    path_str = str(candidate)
+    if candidate.exists() and path_str not in sys.path:
+        sys.path.insert(0, path_str)
+
 from eend.common_utils.diarization_dataset import KaldiDiarizationDataset
 from eend.train import build_cuda_batch
 
