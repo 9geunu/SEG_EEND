@@ -45,8 +45,8 @@
     --standalone \
     --tee 3 \
     eend/train.py -c examples/train.yaml --ddp --noam-k 1 \
-    --train-batchsize 32 \
-    --accum-steps 2 \
+    --train-batchsize 48 \
+    --accum-steps 1 \
     --prefetch-factor 1 \
     --multiprocessing-context fork
   ```
