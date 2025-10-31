@@ -11,11 +11,12 @@ from backend.models import (
 )
 from common_utils.diarization_dataset import KaldiDiarizationDataset
 from common_utils.gpu_utils import use_single_gpu
+from common_utils.torch_features import compute_torch_logmel
 from os.path import join
 from pathlib import Path
 from scipy.signal import medfilt
 from torch.utils.data import DataLoader
-from train import _convert
+from train import _convert, _convert_waveform
 from types import SimpleNamespace
 from typing import TextIO
 import logging
@@ -41,21 +42,23 @@ def get_infer_dataloader(args: SimpleNamespace) -> DataLoader:
         subsampling=args.subsampling,
         use_last_samples=True,
         min_length=0,
+        feature_stage=args.feature_stage,
     )
+    collate_fn = _convert_waveform if args.feature_stage == "cuda" else _convert
     infer_loader = DataLoader(
         infer_set,
         batch_size=1,
-        collate_fn=_convert,
+        collate_fn=collate_fn,
         num_workers=0,
         shuffle=False,
         worker_init_fn=_init_fn,
     )
 
-    Y, _, _ = infer_set.__getitem__(0)
-    assert Y.shape[1] == \
-        (args.feature_dim * (1 + 2 * args.context_size)), \
-        f"Expected feature dimensionality of \
-        {args.feature_dim} but {Y.shape[1]} found."
+    if args.feature_stage != "cuda":
+        Y, _, _ = infer_set.__getitem__(0)
+        assert Y.shape[1] == \
+            (args.feature_dim * (1 + 2 * args.context_size)), \
+            f"Expected feature dimensionality of {args.feature_dim} but {Y.shape[1]} found."
     return infer_loader
 
 
@@ -204,6 +207,8 @@ def parse_arguments() -> SimpleNamespace:
 
     parser.add_argument('--quantize-dynamic', action='store_true',
                         help='Apply torch.quantization.quantize_dynamic (int8) before inference (CPU only).')
+    parser.add_argument('--feature-stage', default='cuda', choices=['dataset', 'cuda'],
+                        help='Where to compute log-mel features (dataset=CPU precomputed, cuda=PyTorch logmel).')
     args = parser.parse_args()
     return args
 
@@ -294,8 +299,27 @@ if __name__ == '__main__':
     Path(out_dir).mkdir(parents=True, exist_ok=True)
 
     for i, batch in enumerate(infer_loader):
-        input = torch.stack(batch['xs']).to(args.device)
-        name = batch['names'][0]
+        if args.feature_stage == "cuda":
+            waveform = batch['waveforms'][0].unsqueeze(0).float()
+            lengths = torch.tensor([waveform.shape[1]], dtype=torch.long)
+            spans = [batch['spans'][0]]
+
+            logmel_args = SimpleNamespace(**vars(args))
+            if getattr(logmel_args, "num_frames", 0) <= 0:
+                logmel_args.num_frames = waveform.shape[1]
+
+            features, _, _ = compute_torch_logmel(
+                waveform,
+                lengths,
+                spans,
+                logmel_args,
+                device=torch.device("cpu"),
+            )
+            input = features.to(args.device)
+            name = batch['names'][0]
+        else:
+            input = torch.stack(batch['xs']).to(args.device)
+            name = batch['names'][0]
         with torch.no_grad():
             y_pred = model.estimate_sequential(input, args)[0]
         post_y = postprocess_output(
