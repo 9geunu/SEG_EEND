@@ -201,6 +201,9 @@ def parse_arguments() -> SimpleNamespace:
     attractor_args.add_argument(
         '--detach-attractor-loss', default=False, type=bool,
         help='If True, avoid backpropagation on attractor loss')
+
+    parser.add_argument('--quantize-dynamic', action='store_true',
+                        help='Apply torch.quantization.quantize_dynamic (int8) before inference (CPU only).')
     args = parser.parse_args()
     return args
 
@@ -246,6 +249,16 @@ if __name__ == '__main__':
 
     model = average_checkpoints(
         args.device, model, args.models_path, args.epochs)
+
+    if args.quantize_dynamic:
+        if args.device.type != "cpu":
+            raise ValueError("Dynamic quantization only supports CPU inference.")
+        model = torch.quantization.quantize_dynamic(
+            model,
+            {torch.nn.Linear},
+            dtype=torch.qint8,
+        )
+
     model.eval()
 
     out_dir = join(
