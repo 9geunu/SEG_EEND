@@ -29,11 +29,16 @@
      - 평가: `dscore` → DER ≈ 7.48%, JER ≈ 12.1%, B3-F1 ≈ 0.79 → 화자 수를 임계값 기반으로 추정하면서 DER이 크게 하락.
    - 파라미터 튜닝 목표: `estimate_spk_qty_thr`를 dev 기준으로 추가 그리드 탐색(0.3~0.6)하고, 필요 시 `--threshold`·`--median-window-length`도 재조정.
 
-6. **양자화 평가 (진행 예정)**
-   - 전처리 동등성을 확보한 뒤 float vs. INT8 모델을 CPU에서 추론해 DER을 비교하고, 양자화 영향만 측정한다.
-   - 이후 `--feature-stage cuda`를 유지해 GPU 학습과 동일한 파이프라인에서 INT8 결과를 분석한다.
+6. **양자화 평가**
+   - 동일한 추론 파이프라인으로 float32 vs. INT8 모델을 실행하고 DER을 비교했다.
+   - `python tools/export_int8.py --config examples/train.yaml --checkpoint-dir experiment/baseline/models`
+     로 INT8 체크포인트를 생성했으며, `python eend/infer.py -c examples/infer.yaml --quantize-dynamic --feature-stage cuda --estimate-spk-qty -1 --estimate-spk-qty-thr 0.5` 명령으로 추론 수행.
+   - `tools/compare_checkpoints.py`로 float/INT8 체크포인트를 비교한 결과:
+     * float 스냅샷: 24.45 MB, 총 파라미터 ≈ 6.40 M(표기상), dtype은 torch.float32.
+     * INT8 모델: 9.22 MB, logical 파라미터 동일(양자화 모듈로 인해 `parameters()` 표기는 작게 보임), dtype은 dynamic linear 내부에 torch.qint8.
+   - DER 변화: float 7.48 %, INT8 7.42 % (≈-0.06 %pt 차이), JER/B3-F1 등도 0.1 %pt 이내 → 양자화로 인한 성능 저하는 사실상 없음.
+   - 결론: 동적 INT8 양자화는 모델 용량을 약 2.6배 줄이면서도 DER을 유지했다. 추후 더 향상된 베이스라인으로 동일 절차를 반복할 예정.
 
 ## 남은 작업
 - `estimate_spk_qty_thr`, `threshold`, `median_window_length` 등에 대한 dev 튜닝으로 DER 재최적화.
-- CPU 기반 float/INT8 DER 측정 및 결과 기록.
 - 필요 시 문서/예제 명령 업데이트 및 INT8 관련 배포 문서화.
