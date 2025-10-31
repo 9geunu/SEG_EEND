@@ -259,6 +259,26 @@ if __name__ == '__main__':
             dtype=torch.qint8,
         )
 
+        quant_dir = Path("experiment") / "quantized" / "models"
+        quant_dir.mkdir(parents=True, exist_ok=True)
+
+        epochs_tag = (args.epochs or "latest").replace(',', '_').replace('-', '_').replace(' ', '')
+        quant_path = quant_dir / f"quantized_epochs_{epochs_tag}.pt"
+
+        torch.save({
+            "model_state": model.state_dict(),
+            "metadata": {
+                "source_models_path": args.models_path,
+                "epochs": args.epochs,
+                "quantization": {
+                    "method": "dynamic",
+                    "dtype": "torch.qint8",
+                    "modules": ["torch.nn.Linear"],
+                },
+            },
+        }, quant_path)
+        logging.info("[INT8] Saved quantized model to %s", quant_path)
+
     model.eval()
 
     out_dir = join(
