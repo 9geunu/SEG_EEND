@@ -105,16 +105,31 @@ def compare_samples(
     gpu_features = gpu_features.to(cpu_features.device)
     gpu_labels = gpu_labels.to(cpu_labels.device)
 
-    feature_rmse = _rmse(cpu_features, gpu_features)
-    feature_max = _max_abs(cpu_features, gpu_features)
-    label_rmse = _rmse(cpu_labels, gpu_labels)
-    label_max = _max_abs(cpu_labels, gpu_labels)
+    time_len = min(cpu_features.size(0), gpu_features.size(0))
+    feat_dim = min(cpu_features.size(1), gpu_features.size(1))
+    spk_dim = min(cpu_labels.size(1), gpu_labels.size(1))
 
-    noise = gpu_features - cpu_features
-    feature_snr = _snr(cpu_features, noise)
+    cpu_feat_valid = cpu_features[:time_len, :feat_dim]
+    gpu_feat_valid = gpu_features[:time_len, :feat_dim]
 
-    allclose = bool(torch.allclose(cpu_features, gpu_features, atol=1e-3, rtol=1e-3))
-    labels_close = bool(torch.allclose(cpu_labels, gpu_labels, atol=1e-3, rtol=1e-3))
+    cpu_lbl_valid = cpu_labels[:time_len, :spk_dim]
+    gpu_lbl_valid = gpu_labels[:time_len, :spk_dim]
+
+    feature_rmse = _rmse(cpu_feat_valid, gpu_feat_valid)
+    feature_max = _max_abs(cpu_feat_valid, gpu_feat_valid)
+    label_rmse = _rmse(cpu_lbl_valid, gpu_lbl_valid)
+    label_max = _max_abs(cpu_lbl_valid, gpu_lbl_valid)
+
+    noise = gpu_feat_valid - cpu_feat_valid
+    feature_snr = _snr(cpu_feat_valid, noise)
+
+    allclose = bool(torch.allclose(cpu_feat_valid, gpu_feat_valid, atol=1e-3, rtol=1e-3))
+    labels_close = bool(torch.allclose(cpu_lbl_valid, gpu_lbl_valid, atol=1e-3, rtol=1e-3))
+
+    gpu_pad_ok = True
+    if gpu_features.size(0) > time_len:
+        pad_area = gpu_features[time_len:, :feat_dim]
+        gpu_pad_ok = bool(torch.allclose(pad_area, torch.full_like(pad_area, -1.0), atol=1e-3))
 
     return {
         "feature_rmse": feature_rmse,
@@ -124,6 +139,10 @@ def compare_samples(
         "label_max": label_max,
         "features_allclose": allclose,
         "labels_allclose": labels_close,
+        "time_len": time_len,
+        "cpu_feat_len": cpu_features.size(0),
+        "gpu_feat_len": gpu_features.size(0),
+        "gpu_pad_ok": gpu_pad_ok,
     }
 
 
