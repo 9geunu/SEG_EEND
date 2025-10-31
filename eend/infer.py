@@ -305,8 +305,9 @@ if __name__ == '__main__':
             spans = [batch['spans'][0]]
 
             logmel_args = SimpleNamespace(**vars(args))
+            # Avoid padding to raw sample counts; disable padding for full-length inference
             if getattr(logmel_args, "num_frames", 0) <= 0:
-                logmel_args.num_frames = waveform.shape[1]
+                logmel_args.num_frames = 0
 
             features, _, _ = compute_torch_logmel(
                 waveform,
