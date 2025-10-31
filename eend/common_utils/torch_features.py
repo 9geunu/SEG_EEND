@@ -61,6 +61,10 @@ def compute_torch_logmel(
     audio = audio.to(device)
     lengths = lengths.to(device)
 
+    max_output_speakers = getattr(args, "num_speakers", 0)
+    if max_output_speakers is None:
+        max_output_speakers = 0
+
     fft_size = _fft_size(int(args.frame_size))
     window = torch.hann_window(int(args.frame_size), device=device, dtype=audio.dtype)
     stft = torch.stft(
@@ -122,13 +126,20 @@ def compute_torch_logmel(
         feat = _splice_tensor(feat, int(args.context_size))
         feat = _subsample_tensor(feat, int(args.subsampling))
         labels = _subsample_tensor(labels, int(args.subsampling))
-        labels = _select_top_speakers(labels, int(args.num_speakers))
+        labels = _select_top_speakers(labels, int(max_output_speakers))
 
         feature_list.append(feat)
         label_list.append(labels)
         speaker_counts.append(labels.shape[1])
 
-    feature_list, label_list = pad_sequence(feature_list, label_list, int(args.num_frames))
+    target_frames = getattr(args, "num_frames", 0)
+    if target_frames is None:
+        target_frames = 0
+    target_frames = int(target_frames)
+
+    if target_frames > 0:
+        feature_list, label_list = pad_sequence(feature_list, label_list, target_frames)
+
     max_speakers = max(speaker_counts) if speaker_counts else 0
     label_list = pad_labels(label_list, max_speakers)
 

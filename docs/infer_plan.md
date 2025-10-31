@@ -13,18 +13,17 @@
    - `train.py`와 평가 스크립트가 이 함수를 재사용하도록 수정하여 CPU/GPU 어느 장치에서도 같은 코드를 호출하도록 통일.
 
 3. **회귀 테스트**
-   - `tools/feature_parity_check.py`를 리팩터링하여 동일 waveform을 CPU/ GPU 경로에 통과시킨 뒤 RMSE, MAX, SNR, allclose 여부를 출력.
+   - `tools/feature_parity_check.py`를 리팩터링하여 동일 waveform을 CPU/GPU 경로에 통과시킨 뒤 RMSE, MAX, SNR, allclose 여부를 출력.
    - 실행 결과: 평균 RMSE ≈ 3.5e-07, SNR ≈ 130 dB, `features_allclose=True`로 확인되어 CPU/GPU 로그멜이 거의 완벽히 일치함을 확인.
 
-4. **추론 파이프라인 정렬 (진행 예정)**
-   - `infer.py`에서 `compute_torch_logmel`을 사용하도록 업데이트해 CPU 기반 추론(플로트/INT8)의 입력 분포를 학습 시 구성과 동일하게 맞춘다.
-   - `--feature-stage` 옵션(또는 기본값)을 통해 CPU에서 GPU 파이프라인을 재현하고, INT8 모델 평가와 float 기준 비교를 동일 조건에서 수행한다.
+4. **추론 파이프라인 정렬**
+   - `infer.py`에서 `compute_torch_logmel`을 사용하도록 업데이트해 CPU 기반 추론(float/INT8)의 입력 분포를 학습 시 구성과 동일하게 맞춤.
+   - `--feature-stage` 옵션을 추가해 필요 시 기존 CPU feature 경로(`dataset`)로도 fallback 가능.
 
-5. **양자화 평가**
+5. **양자화 평가 (진행 예정)**
    - 전처리 동등성을 확보한 뒤 float vs. INT8 모델을 CPU에서 추론해 DER을 비교하고, 양자화 영향만 측정한다.
-   - 이후 필요 시 GPU 추론 옵션(`--feature-stage cuda`)을 추가하여 성능 검증 및 문서화를 진행한다.
+   - 이후 필요 시 GPU 추론 옵션(`--feature-stage cuda`)을 사용해 성능 검증 및 문서화를 진행한다.
 
 ## 남은 작업
-- `infer.py`에 공용 전처리 경로 적용 및 옵션 정리.
 - CPU 기반 float/INT8 DER 측정 및 결과 기록.
 - 필요 시 문서/예제 명령 업데이트.
