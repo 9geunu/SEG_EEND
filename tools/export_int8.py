@@ -27,8 +27,10 @@ import yaml
 from types import SimpleNamespace
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-if str(REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(REPO_ROOT))
+for path_candidate in (REPO_ROOT, REPO_ROOT / "eend"):
+    path_str = str(path_candidate)
+    if path_candidate.exists() and path_str not in sys.path:
+        sys.path.insert(0, path_str)
 
 from eend.backend.models import get_model
 
