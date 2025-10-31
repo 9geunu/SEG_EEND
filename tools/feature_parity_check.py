@@ -20,7 +20,7 @@ for candidate in (REPO_ROOT, REPO_ROOT / "eend"):
         sys.path.insert(0, path_str)
 
 from eend.common_utils.diarization_dataset import KaldiDiarizationDataset
-from eend.train import build_cuda_batch
+from eend.common_utils.torch_features import compute_torch_logmel
 
 
 def _load_config(path: Path) -> Dict:
@@ -164,13 +164,12 @@ def main() -> None:
         raise ValueError("Data directory must be provided via --data-dir or config valid/train path")
 
     dataset_kwargs = _dataset_kwargs(cfg, data_dir)
-    cpu_dataset = KaldiDiarizationDataset(feature_stage="dataset", **dataset_kwargs)
-    gpu_dataset = KaldiDiarizationDataset(feature_stage="cuda", **dataset_kwargs)
+    dataset = KaldiDiarizationDataset(feature_stage="cuda", **dataset_kwargs)
 
-    if len(cpu_dataset) == 0:
+    if len(dataset) == 0:
         raise RuntimeError(f"Dataset at {data_dir} is empty")
 
-    limit = min(args.samples, len(cpu_dataset))
+    limit = min(args.samples, len(dataset))
     indices = list(range(limit))
 
     device = torch.device("cuda")
@@ -181,23 +180,34 @@ def main() -> None:
     stats: List[Dict[str, float]] = []
 
     for idx in indices:
-        cpu_feat, cpu_lbl, rec = cpu_dataset[idx]
-        wave_sample = gpu_dataset[idx]
+        sample = dataset[idx]
+        rec = sample["names"]
 
-        batch = {
-            "audio": wave_sample["waveform"].unsqueeze(0).to(device),
-            "lengths": torch.tensor([wave_sample["waveform"].shape[0]], device=device),
-            "spans": [wave_sample["spans"]],
-            "speaker_count": [wave_sample["speaker_count"]],
-            "names": [wave_sample["names"]],
-        }
+        waveform = sample["waveform"].float().unsqueeze(0)
+        lengths = torch.tensor([sample["waveform"].shape[0]], dtype=torch.long)
+        spans_batch = [sample["spans"]]
 
-        gpu_feat, gpu_lbl, _ = build_cuda_batch(batch, compare_args)
+        cpu_feat, cpu_lbl, _ = compute_torch_logmel(
+            waveform.clone(),
+            lengths.clone(),
+            spans_batch,
+            compare_args,
+            device=torch.device("cpu"),
+        )
+        cpu_feat = cpu_feat.squeeze(0).cpu()
+        cpu_lbl = cpu_lbl.squeeze(0).cpu()
+
+        waveform_cuda = waveform.to(device)
+        lengths_cuda = lengths.to(device)
+        gpu_feat, gpu_lbl, _ = compute_torch_logmel(
+            waveform_cuda,
+            lengths_cuda,
+            spans_batch,
+            compare_args,
+            device=device,
+        )
         gpu_feat = gpu_feat.squeeze(0).cpu()
         gpu_lbl = gpu_lbl.squeeze(0).cpu()
-
-        cpu_feat = cpu_feat.float()
-        cpu_lbl = cpu_lbl.float()
 
         sample_stats = compare_samples(cpu_feat, cpu_lbl, gpu_feat, gpu_lbl)
         sample_stats["record"] = rec
