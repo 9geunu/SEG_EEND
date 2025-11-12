@@ -49,9 +49,12 @@ faulthandler.enable()
 # === FASTER TRAINING ===
 import torch.multiprocessing as mp
 mp.set_sharing_strategy("file_system")  # use shared files instead of file descriptors
-torch.cuda.synchronize()
-start = torch.cuda.Event(enable_timing=True)
-end = torch.cuda.Event(enable_timing=True)
+if torch.cuda.is_available():
+    torch.cuda.synchronize()
+    start = torch.cuda.Event(enable_timing=True)
+    end = torch.cuda.Event(enable_timing=True)
+else:
+    start = end = None
 
 # === DDP IMPORTS ===
 import os
