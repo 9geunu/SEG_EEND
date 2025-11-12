@@ -50,13 +50,19 @@ def load_config(cfg_path: Path) -> SimpleNamespace:
     return ns
 
 
-def load_model(state_path: Path, args: SimpleNamespace) -> torch.nn.Module:
-    model = get_model(args)
+def load_model(state_path: Path, args: SimpleNamespace, use_quantized: bool) -> torch.nn.Module:
     payload = torch.load(state_path, map_location="cpu")
-    if isinstance(payload, dict) and "model_state" in payload:
-        state = payload["model_state"]
-    else:
-        state = payload
+    meta = payload.get("metadata", {}) if isinstance(payload, dict) else {}
+    is_quantized_ckpt = meta.get("quantization", {}).get("method") == "dynamic"
+
+    model = get_model(args)
+    if use_quantized or is_quantized_ckpt:
+        if torch.backends.quantized.engine == 'none':
+            torch.backends.quantized.engine = 'fbgemm'
+        model = torch.quantization.quantize_dynamic(model, {torch.nn.Linear}, dtype=torch.qint8)
+        model.eval()
+
+    state = payload.get("model_state") if isinstance(payload, dict) else payload
     model.load_state_dict(state)
     model.eval()
     return model
@@ -96,13 +102,7 @@ def main() -> None:
 
     cfg_ns = load_config(args.config)
     dataloader = get_infer_dataloader(cfg_ns)
-    model = load_model(args.checkpoint, cfg_ns)
-
-    if args.quantize_dynamic:
-        if torch.backends.quantized.engine == 'none':
-            torch.backends.quantized.engine = 'fbgemm'
-        model = torch.quantization.quantize_dynamic(model, {torch.nn.Linear}, dtype=torch.qint8)
-        model.eval()
+    model = load_model(args.checkpoint, cfg_ns, args.quantize_dynamic)
 
     activities = [ProfilerActivity.CPU]
     with profile(activities=activities, record_shapes=True, profile_memory=True) as prof:
