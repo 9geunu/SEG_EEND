@@ -8,6 +8,7 @@
 from backend.models import (
     average_checkpoints,
     get_model,
+    parse_epochs,
 )
 from common_utils.diarization_dataset import KaldiDiarizationDataset
 from common_utils.gpu_utils import use_single_gpu
@@ -18,13 +19,16 @@ from scipy.signal import medfilt
 from torch.utils.data import DataLoader
 from train import _convert, _convert_waveform
 from types import SimpleNamespace
-from typing import TextIO
+from typing import Optional, TextIO
 import logging
 import numpy as np
 import os
 import random
 import torch
 import yamlargparse
+import json
+import psutil
+import time
 
 
 def get_infer_dataloader(args: SimpleNamespace) -> DataLoader:
@@ -60,6 +64,20 @@ def get_infer_dataloader(args: SimpleNamespace) -> DataLoader:
             (args.feature_dim * (1 + 2 * args.context_size)), \
             f"Expected feature dimensionality of {args.feature_dim} but {Y.shape[1]} found."
     return infer_loader
+
+
+def _checkpoint_size_mb(models_path: str, epochs: Optional[str]) -> Optional[float]:
+    if not models_path or not epochs:
+        return None
+    try:
+        epoch_list = parse_epochs(epochs)
+    except Exception:
+        return None
+    for epoch in reversed(epoch_list):
+        path = Path(models_path) / f"checkpoint_{epoch}.tar"
+        if path.is_file():
+            return path.stat().st_size / (1024 ** 2)
+    return None
 
 
 def hard_labels_to_rttm(
@@ -209,6 +227,10 @@ def parse_arguments() -> SimpleNamespace:
                         help='Apply torch.quantization.quantize_dynamic (int8) before inference (CPU only).')
     parser.add_argument('--feature-stage', default='cuda', choices=['dataset', 'cuda'],
                         help='Where to compute log-mel features (dataset=CPU precomputed, cuda=PyTorch logmel).')
+    parser.add_argument('--measure-metrics', action='store_true',
+                        help='Collect inference latency/throughput/memory metrics.')
+    parser.add_argument('--metric-log', type=str,
+                        help='Optional JSON file to save metrics (defaults to <rttms_dir>/metrics.json).')
     args = parser.parse_args()
     return args
 
@@ -228,6 +250,17 @@ if __name__ == '__main__':
     os.environ['PYTHONHASHSEED'] = str(args.seed)
 
     logging.info(args)
+
+    metric_tracker = None
+    if getattr(args, "measure_metrics", False):
+        metric_tracker = {
+            "latencies_ms": [],
+            "ram_deltas_mb": [],
+            "start_time": time.perf_counter(),
+            "samples": 0,
+            "process": psutil.Process(os.getpid()),
+            "model_size_mb": _checkpoint_size_mb(args.models_path, args.epochs),
+        }
 
     infer_loader = get_infer_dataloader(args)
 
@@ -279,6 +312,9 @@ if __name__ == '__main__':
     if args.quantize_dynamic:
         if args.device.type != "cpu":
             raise ValueError("Dynamic quantization only supports CPU inference.")
+
+        torch.backends.quantized.engine = 'fbgemm'
+
         model = torch.quantization.quantize_dynamic(
             model,
             {torch.nn.Linear},
@@ -303,6 +339,8 @@ if __name__ == '__main__':
             },
         }, quant_path)
         logging.info("[INT8] Saved quantized model to %s", quant_path)
+        if metric_tracker is not None:
+            metric_tracker["model_size_mb"] = quant_path.stat().st_size / (1024 ** 2)
 
     model.eval()
 
@@ -341,11 +379,40 @@ if __name__ == '__main__':
         else:
             input = torch.stack(batch['xs']).to(args.device)
             name = batch['names'][0]
+        if metric_tracker is not None:
+            mem_before = metric_tracker["process"].memory_info().rss / (1024 ** 2)
+            start = time.perf_counter()
         with torch.no_grad():
             y_pred = model.estimate_sequential(input, args)[0]
+        if metric_tracker is not None:
+            end = time.perf_counter()
+            mem_after = metric_tracker["process"].memory_info().rss / (1024 ** 2)
+            metric_tracker["latencies_ms"].append((end - start) * 1000)
+            metric_tracker["ram_deltas_mb"].append(max(0.0, mem_after - mem_before))
+            metric_tracker["samples"] += input.shape[0]
         post_y = postprocess_output(
             y_pred, args.subsampling,
             args.threshold, args.median_window_length)
         rttm_filename = join(out_dir, f"{name}.rttm")
         with open(rttm_filename, 'w') as rttm_file:
             hard_labels_to_rttm(post_y, name, rttm_file)
+
+    if metric_tracker is not None and metric_tracker["latencies_ms"]:
+        elapsed = time.perf_counter() - metric_tracker["start_time"]
+        summary = {
+            "inference_time_ms": {
+                "mean": float(np.mean(metric_tracker["latencies_ms"])),
+                "std": float(np.std(metric_tracker["latencies_ms"])),
+            },
+            "peak_ram_mb": float(max(metric_tracker["ram_deltas_mb"]) if metric_tracker["ram_deltas_mb"] else 0.0),
+            "throughput_samples_per_sec": float(metric_tracker["samples"] / elapsed) if elapsed > 0 else 0.0,
+            "total_elapsed_sec": float(elapsed),
+            "model_size_mb": metric_tracker["model_size_mb"],
+        }
+        logging.info("[METRIC] inference %.2f±%.2f ms | peak RAM %.2f MB | throughput %.2f samples/s | elapsed %.2f s",
+                     summary["inference_time_ms"]["mean"], summary["inference_time_ms"]["std"],
+                     summary["peak_ram_mb"], summary["throughput_samples_per_sec"], summary["total_elapsed_sec"])
+        log_path = Path(args.metric_log) if args.metric_log else Path(args.rttms_dir) / "metrics.json"
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        with log_path.open("w", encoding="utf-8") as fp:
+            json.dump(summary, fp, indent=2)
