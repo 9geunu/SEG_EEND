@@ -213,7 +213,7 @@ class MultiHeadSelfAttention(Module):
             / np.sqrt(self.d_k)
         # scores: (B, h, T, T)
         self.att = F.softmax(scores, dim=3)
-        p_att = F.dropout(self.att, self.dropout)
+        p_att = F.dropout(self.att, self.dropout, training=self.training)
         x = torch.matmul(p_att, v.permute(0, 2, 1, 3))
         x = x.permute(0, 2, 1, 3).reshape(-1, self.h * self.d_k)
         return self.linearO(x)
@@ -236,7 +236,13 @@ class PositionwiseFeedForward(Module):
         self.dropout = dropout
 
     def __call__(self, x: torch.Tensor) -> torch.Tensor:
-        return self.linear2(F.dropout(F.relu(self.linear1(x)), self.dropout))
+        return self.linear2(
+            F.dropout(
+                F.relu(self.linear1(x)),
+                self.dropout,
+                training=self.training,
+            )
+        )
 
 
 class TransformerEncoder(Module):
@@ -291,13 +297,13 @@ class TransformerEncoder(Module):
             # self-attention
             s = getattr(self, '{}{:d}'.format("self_att_", i))(e, x.shape[0])
             # residual
-            e = e + F.dropout(s, self.dropout)
+            e = e + F.dropout(s, self.dropout, training=self.training)
             # layer normalization
             e = getattr(self, '{}{:d}'.format("lnorm2_", i))(e)
             # positionwise feed-forward
             s = getattr(self, '{}{:d}'.format("ff_", i))(e)
             # residual
-            e = e + F.dropout(s, self.dropout)
+            e = e + F.dropout(s, self.dropout, training=self.training)
         # final layer normalization
         # output: (BT, F)
         return self.lnorm_out(e)
